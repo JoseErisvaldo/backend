@@ -1,9 +1,15 @@
 import type { Request, Response } from "express";
-import { createPaymentSchema } from "./payment.schemas";
+import { createPaymentSchema, listPaymentsQuerySchema } from "./payment.schemas";
 import { paymentService } from "./payment.service";
 import { HttpError } from "../../shared/http-error";
 
 export const paymentController = {
+  async list(req: Request, res: Response) {
+    const { page, pageSize } = listPaymentsQuerySchema.parse(req.query);
+    const result = await paymentService.listByUser(req.userId!, page, pageSize);
+    res.status(200).json(result);
+  },
+
   async getById(req: Request, res: Response) {
     const paymentId = req.params.paymentId;
     if (typeof paymentId !== "string") {

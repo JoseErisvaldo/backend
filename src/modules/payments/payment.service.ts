@@ -9,11 +9,30 @@ import { createPaymentSchema, mercadoPagoWebhookSchema } from './payment.schemas
 
 const mercadoPagoOrderSchema = z.object({
   id: z.union([z.string(), z.number()]),
+  type: z.string().optional(),
+  processing_mode: z.string().optional(),
   status: z.string().optional(),
   status_detail: z.string().optional(),
+  external_reference: z.string().optional(),
+  last_updated_date: z.string().optional(),
+  currency: z.string().optional(),
+  capture_mode: z.string().optional(),
+  country_code: z.string().optional(),
+  created_date: z.string().optional(),
+  total_amount: z.union([z.string(), z.number()]).optional(),
+  total_paid_amount: z.union([z.string(), z.number()]).optional(),
   transactions: z.object({
     payments: z.array(z.object({
+      id: z.union([z.string(), z.number()]).optional(),
+      amount: z.union([z.string(), z.number()]).optional(),
+      status: z.string().optional(),
+      status_detail: z.string().optional(),
+      reference_id: z.string().optional(),
+      expiration_time: z.string().optional(),
+      date_of_expiration: z.string().optional(),
       payment_method: z.object({
+        id: z.string().optional(),
+        type: z.string().optional(),
         qr_code: z.string().optional(),
         qr_code_base64: z.string().optional(),
         ticket_url: z.string().optional(),
@@ -32,15 +51,62 @@ const mercadoPagoErrorSchema = z.object({
 
 type CreatePaymentInput = z.infer<typeof createPaymentSchema>
 
-function getPaymentDetails(providerResponse: unknown) {
+function getPaymentDetails(providerResponse: unknown, createdAt?: Date) {
   const parsedOrder = mercadoPagoOrderSchema.safeParse(providerResponse)
-  const paymentMethod = parsedOrder.success
-    ? parsedOrder.data.transactions?.payments[0]?.payment_method
+  const order = parsedOrder.success ? parsedOrder.data : undefined
+  const providerPayment = parsedOrder.success
+    ? order?.transactions?.payments[0]
     : undefined
+  const paymentMethod = providerPayment?.payment_method
+  const expiresAt = providerPayment?.date_of_expiration ??
+    (paymentMethod?.id === 'pix' && createdAt
+      ? new Date(createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString()
+      : null)
   return {
     qrCode: paymentMethod?.qr_code ?? null,
     qrCodeBase64: paymentMethod?.qr_code_base64 ?? null,
     ticketUrl: paymentMethod?.ticket_url ?? null,
+    expiresAt,
+    providerOrderDetails: order
+      ? {
+          id: String(order.id),
+          type: order.type ?? null,
+          processingMode: order.processing_mode ?? null,
+          status: order.status ?? null,
+          statusDetail: order.status_detail ?? null,
+          externalReference: order.external_reference ?? null,
+          updatedAt: order.last_updated_date ?? null,
+          currency: order.currency ?? null,
+          captureMode: order.capture_mode ?? null,
+          countryCode: order.country_code ?? null,
+          createdAt: order.created_date ?? null,
+          totalAmount:
+            order.total_amount == null ? null : Number(order.total_amount),
+          totalPaidAmount:
+            order.total_paid_amount == null
+              ? null
+              : Number(order.total_paid_amount),
+          payment: providerPayment
+            ? {
+                id:
+                  providerPayment.id == null
+                    ? null
+                    : String(providerPayment.id),
+                amount:
+                  providerPayment.amount == null
+                    ? null
+                    : Number(providerPayment.amount),
+                status: providerPayment.status ?? null,
+                statusDetail: providerPayment.status_detail ?? null,
+                referenceId: providerPayment.reference_id ?? null,
+                expirationTime: providerPayment.expiration_time ?? null,
+                method: paymentMethod?.id ?? null,
+                methodType: paymentMethod?.type ?? null,
+                expiresAt: providerPayment.date_of_expiration ?? null,
+              }
+            : null,
+        }
+      : null,
   }
 }
 
@@ -109,6 +175,49 @@ function verifyWebhookSignature(orderId: string, requestId: string | undefined, 
 }
 
 export const paymentService = {
+  async listByUser(userId: string, page: number, pageSize: number) {
+    const where = { userId }
+    const [payments, total] = await Promise.all([
+      prisma.payment.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          productId: true,
+          amount: true,
+          paymentMethod: true,
+          status: true,
+          statusDetail: true,
+          providerOrderId: true,
+          createdAt: true,
+          product: { select: { name: true, currency: true } },
+        },
+      }),
+      prisma.payment.count({ where }),
+    ])
+
+    return {
+      payments: payments.map((payment) => ({
+        id: payment.id,
+        productId: payment.productId,
+        amount: Number(payment.amount),
+        paymentMethod: payment.paymentMethod,
+        status: payment.status,
+        statusDetail: payment.statusDetail,
+        providerOrderId: payment.providerOrderId,
+        productName: payment.product.name,
+        currency: payment.product.currency,
+        createdAt: payment.createdAt.toISOString(),
+        expiresAt: payment.paymentMethod === 'pix'
+          ? new Date(payment.createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString()
+          : null,
+      })),
+      pagination: { page, pageSize, total },
+    }
+  },
+
   async create(userId: string, input: CreatePaymentInput) {
     if (!env.MP_ACCESS_TOKEN) {
       throw new HttpError(503, 'O pagamento ainda não está configurado no servidor')
@@ -135,7 +244,7 @@ export const paymentService = {
         paymentMethod: input.method === 'pix' ? 'pix' : input.paymentTypeId,
         status: 'processing',
       },
-      select: { id: true, externalReference: true },
+      select: { id: true, externalReference: true, createdAt: true },
     })
 
     const requestBody = {
@@ -196,7 +305,7 @@ export const paymentService = {
 
       const order = mercadoPagoOrderSchema.parse(responseBody)
       const providerOrderId = String(order.id)
-      const paymentDetails = getPaymentDetails(responseBody)
+      const paymentDetails = getPaymentDetails(responseBody, payment.createdAt)
       if (input.method === 'pix' && !paymentDetails.qrCode && !paymentDetails.ticketUrl) {
         console.warn('Mercado Pago Pix order response did not include payment instructions', {
           providerOrderId,
@@ -296,7 +405,8 @@ export const paymentService = {
         statusDetail: true,
         providerOrderId: true,
         providerResponse: true,
-        product: { select: { name: true } },
+        createdAt: true,
+        product: { select: { name: true, currency: true } },
       },
     })
     if (!payment) throw new HttpError(404, 'Pagamento não encontrado')
@@ -310,7 +420,9 @@ export const paymentService = {
         statusDetail: payment.statusDetail,
         providerOrderId: payment.providerOrderId,
         productName: payment.product.name,
-        ...getPaymentDetails(payment.providerResponse),
+        currency: payment.product.currency,
+        createdAt: payment.createdAt.toISOString(),
+        ...getPaymentDetails(payment.providerResponse, payment.createdAt),
       },
     }
   },

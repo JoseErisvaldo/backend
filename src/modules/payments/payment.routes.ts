@@ -12,6 +12,12 @@ paymentRoutes.post(
   asyncHandler(paymentController.webhook),
 )
 paymentRoutes.get(
+  '/',
+  rateLimit({ windowMs: 15 * 60 * 1000, limit: 240 }),
+  ensureAuthenticated,
+  asyncHandler(paymentController.list),
+)
+paymentRoutes.get(
   '/:paymentId',
   rateLimit({ windowMs: 15 * 60 * 1000, limit: 300 }),
   ensureAuthenticated,

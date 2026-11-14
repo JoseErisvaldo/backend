@@ -22,6 +22,11 @@ export const createPaymentSchema = z.discriminatedUnion('method', [
   }),
 ])
 
+export const listPaymentsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+})
+
 export const mercadoPagoWebhookSchema = z.object({
   data: z.object({ id: z.union([z.string(), z.number()]) }).optional(),
   id: z.union([z.string(), z.number()]).optional(),
