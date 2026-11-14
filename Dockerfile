@@ -3,9 +3,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY prisma ./prisma
+COPY prisma.config.ts ./
 RUN npx prisma generate
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 EXPOSE 3333
-CMD ["sh", "-c", "npx prisma migrate deploy && npm start"]
+CMD ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed && npm start"]
