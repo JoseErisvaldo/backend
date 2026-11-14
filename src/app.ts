@@ -22,3 +22,5 @@ app.use('/api/payments', rateLimit({ windowMs: 15 * 60 * 1000, limit: 20 }))
 app.use('/api/payments', paymentRoutes)
 app.use((_req, _res, next) => next(new HttpError(404, 'Rota não encontrada')))
 app.use(errorHandler)
+
+export default app
