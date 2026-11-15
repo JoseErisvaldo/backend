@@ -10,6 +10,14 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().url().default('http://localhost:5173'),
   MP_ACCESS_TOKEN: z.string().optional(),
   MP_WEBHOOK_SECRET: z.string().optional(),
+  MP_PIX_APPROVAL_TEST_MODE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 })
 
 export const env = envSchema.parse(process.env)
+
+if (env.MP_PIX_APPROVAL_TEST_MODE && env.NODE_ENV === 'production') {
+  throw new Error('MP_PIX_APPROVAL_TEST_MODE não pode ser habilitado em produção')
+}

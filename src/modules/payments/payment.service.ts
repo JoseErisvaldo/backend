@@ -51,6 +51,23 @@ const mercadoPagoErrorSchema = z.object({
 
 type CreatePaymentInput = z.infer<typeof createPaymentSchema>
 
+function validatePixApprovalTestMethod(method: CreatePaymentInput['method']) {
+  if (env.MP_PIX_APPROVAL_TEST_MODE && method !== 'pix') {
+    throw new HttpError(503, 'O modo de teste de aprovação aceita somente Pix')
+  }
+}
+
+function getMercadoPagoAccessToken() {
+  const accessToken = env.MP_ACCESS_TOKEN
+  if (!accessToken) {
+    throw new HttpError(
+      503,
+      'O pagamento ainda não está configurado no servidor',
+    )
+  }
+  return accessToken
+}
+
 function getPaymentDetails(providerResponse: unknown, createdAt?: Date) {
   const parsedOrder = mercadoPagoOrderSchema.safeParse(providerResponse)
   const order = parsedOrder.success ? parsedOrder.data : undefined
@@ -219,9 +236,8 @@ export const paymentService = {
   },
 
   async create(userId: string, input: CreatePaymentInput) {
-    if (!env.MP_ACCESS_TOKEN) {
-      throw new HttpError(503, 'O pagamento ainda não está configurado no servidor')
-    }
+    validatePixApprovalTestMethod(input.method)
+    const accessToken = getMercadoPagoAccessToken()
 
     const [user, product] = await Promise.all([
       prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } }),
@@ -254,6 +270,9 @@ export const paymentService = {
       external_reference: payment.externalReference,
       payer: {
         email: user.email,
+        ...(env.MP_PIX_APPROVAL_TEST_MODE && input.method === 'pix'
+          ? { first_name: 'APRO' }
+          : {}),
         ...(input.identification ? { identification: input.identification } : {}),
       },
       transactions: {
@@ -276,7 +295,7 @@ export const paymentService = {
       const response = await fetch('https://api.mercadopago.com/v1/orders', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${env.MP_ACCESS_TOKEN}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'X-Idempotency-Key': payment.id,
         },
@@ -353,12 +372,10 @@ export const paymentService = {
     if (!verifyWebhookSignature(orderId, requestId, signature)) {
       throw new HttpError(401, 'Assinatura do webhook inválida')
     }
-    if (!env.MP_ACCESS_TOKEN) {
-      throw new HttpError(503, 'Integração com Mercado Pago não está configurada')
-    }
+    const accessToken = getMercadoPagoAccessToken()
 
     const response = await fetch(`https://api.mercadopago.com/v1/orders/${encodeURIComponent(orderId)}`, {
-      headers: { Authorization: `Bearer ${env.MP_ACCESS_TOKEN}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     })
     if (!response.ok) {
       console.error('Mercado Pago webhook order lookup failed', {
