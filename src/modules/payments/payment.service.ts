@@ -51,12 +51,6 @@ const mercadoPagoErrorSchema = z.object({
 
 type CreatePaymentInput = z.infer<typeof createPaymentSchema>
 
-function validatePixApprovalTestMethod(method: CreatePaymentInput['method']) {
-  if (env.MP_PIX_APPROVAL_TEST_MODE && method !== 'pix') {
-    throw new HttpError(503, 'O modo de teste de aprovação aceita somente Pix')
-  }
-}
-
 function getMercadoPagoAccessToken() {
   const accessToken = env.MP_ACCESS_TOKEN
   if (!accessToken) {
@@ -202,14 +196,20 @@ export const paymentService = {
         take: pageSize,
         select: {
           id: true,
-          productId: true,
           amount: true,
           paymentMethod: true,
           status: true,
           statusDetail: true,
           providerOrderId: true,
           createdAt: true,
-          product: { select: { name: true, currency: true } },
+          items: {
+            select: {
+              productName: true,
+              quantity: true,
+              unitPrice: true,
+              currency: true,
+            },
+          },
         },
       }),
       prisma.payment.count({ where }),
@@ -218,14 +218,22 @@ export const paymentService = {
     return {
       payments: payments.map((payment) => ({
         id: payment.id,
-        productId: payment.productId,
         amount: Number(payment.amount),
         paymentMethod: payment.paymentMethod,
         status: payment.status,
         statusDetail: payment.statusDetail,
         providerOrderId: payment.providerOrderId,
-        productName: payment.product.name,
-        currency: payment.product.currency,
+        productName: payment.items.length === 1
+          ? payment.items[0].productName
+          : `${payment.items.length} produtos`,
+        currency: payment.items[0]?.currency ?? 'BRL',
+        items: payment.items.map((item) => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+          lineTotal: Number(item.unitPrice) * item.quantity,
+          currency: item.currency,
+        })),
         createdAt: payment.createdAt.toISOString(),
         expiresAt: payment.paymentMethod === 'pix'
           ? new Date(payment.createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString()
@@ -236,29 +244,49 @@ export const paymentService = {
   },
 
   async create(userId: string, input: CreatePaymentInput) {
-    validatePixApprovalTestMethod(input.method)
     const accessToken = getMercadoPagoAccessToken()
 
-    const [user, product] = await Promise.all([
+    const [user, products] = await Promise.all([
       prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } }),
-      prisma.product.findFirst({
-        where: { id: input.productId, active: true },
+      prisma.product.findMany({
+        where: { id: { in: input.items.map((item) => item.productId) }, active: true },
         select: { id: true, name: true, price: true, currency: true },
       }),
     ])
     if (!user) throw new HttpError(404, 'Usuário não encontrado')
-    if (!product) throw new HttpError(404, 'Produto não encontrado ou indisponível')
-    if (product.currency !== 'BRL') throw new HttpError(400, 'Moeda do produto não suportada')
+    if (products.length !== input.items.length) {
+      throw new HttpError(404, 'Um ou mais produtos não foram encontrados ou estão indisponíveis')
+    }
 
-    const amount = product.price.toFixed(2)
+    const productsById = new Map(products.map((product) => [product.id, product]))
+    const cartLines = input.items.map((item) => {
+      const product = productsById.get(item.productId)
+      if (!product) throw new HttpError(404, 'Produto não encontrado ou indisponível')
+      if (product.currency !== 'BRL') throw new HttpError(400, 'Moeda do produto não suportada')
+      return { product, quantity: item.quantity, lineTotal: product.price.mul(item.quantity) }
+    })
+    const totalAmount = cartLines.reduce(
+      (total, item) => total.plus(item.lineTotal),
+      new Prisma.Decimal(0),
+    )
+
+    const amount = totalAmount.toFixed(2)
     const payment = await prisma.payment.create({
       data: {
         userId: user.id,
-        productId: product.id,
         externalReference: randomUUID(),
-        amount: product.price,
+        amount: totalAmount,
         paymentMethod: input.method === 'pix' ? 'pix' : input.paymentTypeId,
         status: 'processing',
+        items: {
+          create: cartLines.map(({ product, quantity }) => ({
+            productId: product.id,
+            productName: product.name,
+            quantity,
+            unitPrice: product.price,
+            currency: product.currency,
+          })),
+        },
       },
       select: { id: true, externalReference: true, createdAt: true },
     })
@@ -345,7 +373,17 @@ export const paymentService = {
         payment: {
           ...savedPayment,
           amount: Number(savedPayment.amount),
-          productName: product.name,
+          productName: cartLines.length === 1
+            ? cartLines[0].product.name
+            : `${cartLines.length} produtos`,
+          currency: cartLines[0].product.currency,
+          items: cartLines.map(({ product, quantity }) => ({
+            productName: product.name,
+            quantity,
+            unitPrice: Number(product.price),
+            lineTotal: Number(product.price) * quantity,
+            currency: product.currency,
+          })),
           providerOrderId,
           paymentMethod: savedPayment.paymentMethod,
           ...paymentDetails,
@@ -423,7 +461,14 @@ export const paymentService = {
         providerOrderId: true,
         providerResponse: true,
         createdAt: true,
-        product: { select: { name: true, currency: true } },
+        items: {
+          select: {
+            productName: true,
+            quantity: true,
+            unitPrice: true,
+            currency: true,
+          },
+        },
       },
     })
     if (!payment) throw new HttpError(404, 'Pagamento não encontrado')
@@ -436,8 +481,17 @@ export const paymentService = {
         status: payment.status,
         statusDetail: payment.statusDetail,
         providerOrderId: payment.providerOrderId,
-        productName: payment.product.name,
-        currency: payment.product.currency,
+        productName: payment.items.length === 1
+          ? payment.items[0].productName
+          : `${payment.items.length} produtos`,
+        currency: payment.items[0]?.currency ?? 'BRL',
+        items: payment.items.map((item) => ({
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+          lineTotal: Number(item.unitPrice) * item.quantity,
+          currency: item.currency,
+        })),
         createdAt: payment.createdAt.toISOString(),
         ...getPaymentDetails(payment.providerResponse, payment.createdAt),
       },

@@ -5,10 +5,29 @@ const identificationSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('CNPJ'), number: z.string().regex(/^\d{14}$/) }),
 ])
 
+const itemsSchema = z.array(
+  z.object({
+    productId: z.string().min(1).max(64),
+    quantity: z.number().int().min(1).max(99),
+  }),
+).min(1).max(50).superRefine((items, context) => {
+  const productIds = new Set<string>()
+  items.forEach((item, index) => {
+    if (productIds.has(item.productId)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Cada produto deve aparecer uma única vez no pedido',
+        path: [index, 'productId'],
+      })
+    }
+    productIds.add(item.productId)
+  })
+})
+
 export const createPaymentSchema = z.discriminatedUnion('method', [
   z.object({
     method: z.literal('card'),
-    productId: z.string().min(1).max(64),
+    items: itemsSchema,
     token: z.string().min(1).max(2048),
     paymentMethodId: z.string().min(1).max(100),
     paymentTypeId: z.enum(['credit_card', 'debit_card', 'prepaid_card']),
@@ -17,7 +36,7 @@ export const createPaymentSchema = z.discriminatedUnion('method', [
   }),
   z.object({
     method: z.literal('pix'),
-    productId: z.string().min(1).max(64),
+    items: itemsSchema,
     identification: identificationSchema,
   }),
 ])
