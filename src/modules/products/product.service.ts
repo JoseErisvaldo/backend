@@ -70,6 +70,7 @@ export const productService = {
           price: true,
           currency: true,
           active: true,
+          createdAt: true,
         },
       }),
       prisma.product.count(),
@@ -101,6 +102,7 @@ export const productService = {
         price: true,
         currency: true,
         active: true,
+        createdAt: true,
       },
     })
 
@@ -120,6 +122,7 @@ export const productService = {
         price: true,
         currency: true,
         active: true,
+        createdAt: true,
       },
     })
 
