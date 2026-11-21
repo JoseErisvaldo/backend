@@ -5,6 +5,7 @@ import { HttpError } from '../../shared/http-error'
 import { prisma } from '../../shared/prisma'
 
 type Credentials = { email: string; password: string }
+type UserRole = 'USER' | 'ADMIN' | 'MODERATOR'
 
 function createToken(userId: string): string {
   return jwt.sign({}, env.JWT_SECRET, {
@@ -13,8 +14,14 @@ function createToken(userId: string): string {
   })
 }
 
-function toPublicUser(user: { id: string; name: string; email: string; createdAt: Date }) {
-  return { id: user.id, name: user.name, email: user.email, createdAt: user.createdAt.toISOString() }
+function toPublicUser(user: { id: string; name: string; email: string; role: UserRole; createdAt: Date }) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    createdAt: user.createdAt.toISOString(),
+  }
 }
 
 export const authService = {
@@ -26,7 +33,7 @@ export const authService = {
     const passwordHash = await bcrypt.hash(input.password, 12)
     const user = await prisma.user.create({
       data: { name: input.name, email, passwordHash },
-      select: { id: true, name: true, email: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, createdAt: true },
     })
     return { user: toPublicUser(user), token: createToken(user.id) }
   },
@@ -45,7 +52,7 @@ export const authService = {
   async me(userId: string) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, email: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, createdAt: true },
     })
     if (!user) throw new HttpError(404, 'Usuário não encontrado')
     return toPublicUser(user)
