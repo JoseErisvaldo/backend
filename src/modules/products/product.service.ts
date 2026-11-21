@@ -1,5 +1,19 @@
 import { prisma } from '../../shared/prisma'
-import type { CreateProductInput, ListAdminProductsQuery } from './product.schemas'
+import { HttpError } from '../../shared/http-error'
+import type {
+  CreateProductInput,
+  ListAdminProductsQuery,
+  SetProductActiveInput,
+  UpdateProductInput,
+} from './product.schemas'
+
+async function ensureProductExists(productId: string) {
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { id: true },
+  })
+  if (!product) throw new HttpError(404, 'Produto não encontrado')
+}
 
 export const productService = {
   async create(input: CreateProductInput) {
@@ -55,6 +69,7 @@ export const productService = {
           description: true,
           price: true,
           currency: true,
+          active: true,
         },
       }),
       prisma.product.count(),
@@ -71,5 +86,43 @@ export const productService = {
         total,
       },
     }
+  },
+
+  async update(productId: string, input: UpdateProductInput) {
+    await ensureProductExists(productId)
+
+    const product = await prisma.product.update({
+      where: { id: productId },
+      data: input,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        price: true,
+        currency: true,
+        active: true,
+      },
+    })
+
+    return { ...product, price: Number(product.price) }
+  },
+
+  async setActive(productId: string, input: SetProductActiveInput) {
+    await ensureProductExists(productId)
+
+    const product = await prisma.product.update({
+      where: { id: productId },
+      data: { active: input.active },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        price: true,
+        currency: true,
+        active: true,
+      },
+    })
+
+    return { ...product, price: Number(product.price) }
   },
 }

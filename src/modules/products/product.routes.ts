@@ -12,6 +12,18 @@ productRoutes.get(
   ensureRoles(Role.ADMIN, Role.MODERATOR),
   asyncHandler(productController.listForAdmin),
 )
+productRoutes.patch(
+  '/:productId/status',
+  ensureAuthenticated,
+  ensureRoles(Role.ADMIN, Role.MODERATOR),
+  asyncHandler(productController.setActive),
+)
+productRoutes.patch(
+  '/:productId',
+  ensureAuthenticated,
+  ensureRoles(Role.ADMIN, Role.MODERATOR),
+  asyncHandler(productController.update),
+)
 productRoutes.get('/', asyncHandler(productController.list))
 productRoutes.post(
   '/',
