@@ -16,8 +16,8 @@ export const paymentController = {
   },
 
   async listForAdmin(req: Request, res: Response) {
-    const { page, pageSize } = listAdminPaymentsQuerySchema.parse(req.query);
-    const result = await paymentService.listForAdmin(page, pageSize);
+    const query = listAdminPaymentsQuerySchema.parse(req.query);
+    const result = await paymentService.listForAdmin(query);
     res.status(200).json(result);
   },
 
