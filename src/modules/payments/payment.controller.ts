@@ -1,5 +1,10 @@
 import type { Request, Response } from "express";
-import { createPaymentSchema, listPaymentsQuerySchema } from "./payment.schemas";
+import {
+  createPaymentSchema,
+  listAdminPaymentsQuerySchema,
+  listPaymentsQuerySchema,
+  paymentIdSchema,
+} from "./payment.schemas";
 import { paymentService } from "./payment.service";
 import { HttpError } from "../../shared/http-error";
 
@@ -7,6 +12,18 @@ export const paymentController = {
   async list(req: Request, res: Response) {
     const { page, pageSize } = listPaymentsQuerySchema.parse(req.query);
     const result = await paymentService.listByUser(req.userId!, page, pageSize);
+    res.status(200).json(result);
+  },
+
+  async listForAdmin(req: Request, res: Response) {
+    const { page, pageSize } = listAdminPaymentsQuerySchema.parse(req.query);
+    const result = await paymentService.listForAdmin(page, pageSize);
+    res.status(200).json(result);
+  },
+
+  async getByIdForAdmin(req: Request, res: Response) {
+    const paymentId = paymentIdSchema.parse(req.params.paymentId);
+    const result = await paymentService.getByIdForAdmin(paymentId);
     res.status(200).json(result);
   },
 

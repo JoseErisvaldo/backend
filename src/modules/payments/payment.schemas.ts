@@ -46,6 +46,9 @@ export const listPaymentsQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(10),
 })
 
+export const listAdminPaymentsQuerySchema = listPaymentsQuerySchema
+export const paymentIdSchema = z.string().uuid()
+
 export const mercadoPagoWebhookSchema = z.object({
   data: z.object({ id: z.union([z.string(), z.number()]) }).optional(),
   id: z.union([z.string(), z.number()]).optional(),

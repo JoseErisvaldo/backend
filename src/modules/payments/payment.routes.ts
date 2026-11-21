@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
-import { ensureAuthenticated } from '../auth/auth.middleware'
+import { Role } from '@prisma/client'
+import { ensureAuthenticated, ensureRoles } from '../auth/auth.middleware'
 import { asyncHandler } from '../../shared/async-handler'
 import { paymentController } from './payment.controller'
 
@@ -10,6 +11,20 @@ paymentRoutes.post(
   '/webhook',
   rateLimit({ windowMs: 15 * 60 * 1000, limit: 100 }),
   asyncHandler(paymentController.webhook),
+)
+paymentRoutes.get(
+  '/manage',
+  rateLimit({ windowMs: 15 * 60 * 1000, limit: 240 }),
+  ensureAuthenticated,
+  ensureRoles(Role.ADMIN, Role.MODERATOR),
+  asyncHandler(paymentController.listForAdmin),
+)
+paymentRoutes.get(
+  '/manage/:paymentId',
+  rateLimit({ windowMs: 15 * 60 * 1000, limit: 300 }),
+  ensureAuthenticated,
+  ensureRoles(Role.ADMIN, Role.MODERATOR),
+  asyncHandler(paymentController.getByIdForAdmin),
 )
 paymentRoutes.get(
   '/',
