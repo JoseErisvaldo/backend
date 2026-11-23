@@ -11,7 +11,7 @@ export const createProductSchema = z.object({
   description: z.string().trim().min(1, 'Informe uma descrição').max(2000),
   price: priceSchema,
   currency: z.string().trim().length(3).toUpperCase().default('BRL'),
-  active: z.boolean().default(true),
+  active: z.boolean().default(false),
 }).strict()
 
 export const updateProductSchema = z.object({
