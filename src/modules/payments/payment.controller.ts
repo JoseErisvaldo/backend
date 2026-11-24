@@ -3,6 +3,7 @@ import {
   createPaymentSchema,
   listAdminPaymentsQuerySchema,
   listPaymentsQuerySchema,
+  paymentIdempotencyKeySchema,
   paymentIdSchema,
 } from "./payment.schemas";
 import { paymentService } from "./payment.service";
@@ -38,7 +39,8 @@ export const paymentController = {
 
   async create(req: Request, res: Response) {
     const input = createPaymentSchema.parse(req.body);
-    const result = await paymentService.create(req.userId!, input);
+    const idempotencyKey = paymentIdempotencyKeySchema.parse(req.header("Idempotency-Key"));
+    const result = await paymentService.create(req.userId!, input, idempotencyKey);
     res.status(201).json(result);
   },
 

@@ -60,6 +60,7 @@ export const listAdminPaymentsQuerySchema = listPaymentsQuerySchema.extend({
   { message: 'A data inicial deve ser anterior ou igual à data final', path: ['dateTo'] },
 )
 export const paymentIdSchema = z.string().uuid()
+export const paymentIdempotencyKeySchema = z.string().uuid()
 
 export const mercadoPagoWebhookSchema = z.object({
   data: z.object({ id: z.union([z.string(), z.number()]) }).optional(),

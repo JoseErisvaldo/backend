@@ -1,11 +1,18 @@
-import { randomUUID } from 'node:crypto'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { env } from '../../config/env'
 import { HttpError } from '../../shared/http-error'
 import { prisma } from '../../shared/prisma'
 import { createPaymentSchema, mercadoPagoWebhookSchema } from './payment.schemas'
+import {
+  assertSameIdempotentRequest,
+  findPaymentByIdempotencyKey,
+  findProviderCreatedPayment,
+  idempotentPaymentSelect,
+  markPaymentAsFailed,
+  type IdempotentPayment,
+} from './payment-idempotency'
 
 const mercadoPagoOrderSchema = z.object({
   id: z.union([z.string(), z.number()]),
@@ -50,6 +57,59 @@ const mercadoPagoErrorSchema = z.object({
 }).passthrough()
 
 type CreatePaymentInput = z.infer<typeof createPaymentSchema>
+
+function assertProviderOrderMatchesPayment(
+  order: z.infer<typeof mercadoPagoOrderSchema>,
+  payment: Pick<IdempotentPayment, 'amount' | 'externalReference' | 'items'>,
+) {
+  const currency = payment.items[0]?.currency
+  const orderAmount = order.total_amount == null
+    ? null
+    : new Prisma.Decimal(order.total_amount)
+  const isPaid = ['processed', 'approved', 'accredited'].includes(
+    order.status?.toLowerCase() ?? '',
+  )
+  const paidAmount = order.total_paid_amount == null
+    ? null
+    : new Prisma.Decimal(order.total_paid_amount)
+
+  if (
+    order.external_reference !== payment.externalReference ||
+    !currency ||
+    order.currency !== currency ||
+    !orderAmount ||
+    !orderAmount.equals(payment.amount) ||
+    (isPaid && paidAmount && !paidAmount.equals(payment.amount))
+  ) {
+    throw new HttpError(502, 'O valor ou a moeda do pedido no provedor não corresponde ao pagamento')
+  }
+}
+
+function serializeCreatedPayment(payment: IdempotentPayment) {
+  const currency = payment.items[0]?.currency ?? 'BRL'
+  return {
+    payment: {
+      id: payment.id,
+      status: payment.status,
+      statusDetail: payment.statusDetail,
+      amount: Number(payment.amount),
+      productName: payment.items.length === 1
+        ? payment.items[0].productName
+        : `${payment.items.length} produtos`,
+      items: payment.items.map((item) => ({
+        productName: item.productName,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        lineTotal: Number(item.unitPrice) * item.quantity,
+        currency: item.currency,
+      })),
+      currency,
+      providerOrderId: payment.providerOrderId,
+      paymentMethod: payment.paymentMethod,
+      ...getPaymentDetails(payment.providerResponse, payment.createdAt),
+    },
+  }
+}
 
 function getMercadoPagoAccessToken() {
   const accessToken = env.MP_ACCESS_TOKEN
@@ -389,53 +449,98 @@ export const paymentService = {
     }
   },
 
-  async create(userId: string, input: CreatePaymentInput) {
+  async create(userId: string, input: CreatePaymentInput, idempotencyKey: string) {
     const accessToken = getMercadoPagoAccessToken()
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true },
+    })
+    if (!user) throw new HttpError(404, 'Usuário não encontrado')
+    let payment = await findPaymentByIdempotencyKey(idempotencyKey)
 
-    const [user, products] = await Promise.all([
-      prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } }),
-      prisma.product.findMany({
+    if (payment) {
+      assertSameIdempotentRequest(payment, userId, input)
+      if (payment.providerOrderId && payment.providerResponse) {
+        return serializeCreatedPayment(payment)
+      }
+      if (payment.status === 'failed') {
+        throw new HttpError(409, 'Esta tentativa falhou. Inicie uma nova tentativa de pagamento.')
+      }
+    } else {
+      const products = await prisma.product.findMany({
         where: { id: { in: input.items.map((item) => item.productId) }, active: true },
         select: { id: true, name: true, price: true, currency: true },
-      }),
-    ])
-    if (!user) throw new HttpError(404, 'Usuário não encontrado')
-    if (products.length !== input.items.length) {
-      throw new HttpError(404, 'Um ou mais produtos não foram encontrados ou estão indisponíveis')
+      })
+      if (products.length !== input.items.length) {
+        throw new HttpError(404, 'Um ou mais produtos não foram encontrados ou estão indisponíveis')
+      }
+
+      const productsById = new Map(products.map((product) => [product.id, product]))
+      const cartLines = input.items.map((item) => {
+        const product = productsById.get(item.productId)
+        if (!product) throw new HttpError(404, 'Produto não encontrado ou indisponível')
+        if (product.currency !== 'BRL') throw new HttpError(400, 'Moeda do produto não suportada')
+        return { product, quantity: item.quantity, lineTotal: product.price.mul(item.quantity) }
+      })
+      const totalAmount = cartLines.reduce(
+        (total, item) => total.plus(item.lineTotal),
+        new Prisma.Decimal(0),
+      )
+
+      try {
+        payment = await prisma.payment.create({
+          data: {
+            userId: user.id,
+            externalReference: randomUUID(),
+            idempotencyKey,
+            amount: totalAmount,
+            paymentMethod: input.method === 'pix' ? 'pix' : input.paymentTypeId,
+            status: 'processing',
+            items: {
+              create: cartLines.map(({ product, quantity }) => ({
+                productId: product.id,
+                productName: product.name,
+                quantity,
+                unitPrice: product.price,
+                currency: product.currency,
+              })),
+            },
+          },
+          select: idempotentPaymentSelect,
+        })
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+          throw error
+        }
+        payment = await findPaymentByIdempotencyKey(idempotencyKey)
+        if (!payment) throw error
+        assertSameIdempotentRequest(payment, userId, input)
+        if (payment.providerOrderId && payment.providerResponse) {
+          return serializeCreatedPayment(payment)
+        }
+        if (payment.status === 'failed') {
+          throw new HttpError(409, 'Esta tentativa falhou. Inicie uma nova tentativa de pagamento.')
+        }
+      }
     }
 
-    const productsById = new Map(products.map((product) => [product.id, product]))
-    const cartLines = input.items.map((item) => {
-      const product = productsById.get(item.productId)
-      if (!product) throw new HttpError(404, 'Produto não encontrado ou indisponível')
-      if (product.currency !== 'BRL') throw new HttpError(400, 'Moeda do produto não suportada')
-      return { product, quantity: item.quantity, lineTotal: product.price.mul(item.quantity) }
-    })
-    const totalAmount = cartLines.reduce(
-      (total, item) => total.plus(item.lineTotal),
-      new Prisma.Decimal(0),
-    )
-
-    const amount = totalAmount.toFixed(2)
-    const payment = await prisma.payment.create({
-      data: {
-        userId: user.id,
-        externalReference: randomUUID(),
-        amount: totalAmount,
-        paymentMethod: input.method === 'pix' ? 'pix' : input.paymentTypeId,
-        status: 'processing',
-        items: {
-          create: cartLines.map(({ product, quantity }) => ({
-            productId: product.id,
-            productName: product.name,
-            quantity,
-            unitPrice: product.price,
-            currency: product.currency,
-          })),
+    const cartLines = payment.items.map((item) => {
+      const quantity = input.items.find(({ productId }) => productId === item.productId)?.quantity
+      if (quantity === undefined) {
+        throw new HttpError(409, 'A solicitação não corresponde à tentativa de pagamento existente')
+      }
+      return {
+        product: {
+          id: item.productId,
+          name: item.productName,
+          price: item.unitPrice,
+          currency: item.currency,
         },
-      },
-      select: { id: true, externalReference: true, createdAt: true },
+        quantity,
+        lineTotal: item.unitPrice.mul(quantity),
+      }
     })
+    const amount = payment.amount.toFixed(2)
 
     const requestBody = {
       type: 'online',
@@ -471,7 +576,7 @@ export const paymentService = {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
-          'X-Idempotency-Key': payment.id,
+          'X-Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify(requestBody),
       })
@@ -489,14 +594,24 @@ export const paymentService = {
             : undefined,
           externalReference: payment.externalReference,
         })
-        await prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: 'failed' },
-        })
-        throw new HttpError(502, 'O Mercado Pago não conseguiu processar o pagamento')
+        const definitiveRejection =
+          response.status >= 400 &&
+          response.status < 500 &&
+          response.status !== 408 &&
+          response.status !== 429
+        if (definitiveRejection) {
+          const providerCreatedPayment = await findProviderCreatedPayment(payment.id)
+          if (providerCreatedPayment) {
+            return serializeCreatedPayment(providerCreatedPayment)
+          }
+          await markPaymentAsFailed(payment.id)
+          throw new HttpError(502, 'O Mercado Pago não conseguiu processar o pagamento')
+        }
+        throw new HttpError(503, 'Não foi possível confirmar o resultado. Tente novamente com segurança.')
       }
 
       const order = mercadoPagoOrderSchema.parse(responseBody)
+      assertProviderOrderMatchesPayment(order, payment)
       const providerOrderId = String(order.id)
       const paymentDetails = getPaymentDetails(responseBody, payment.createdAt)
       if (input.method === 'pix' && !paymentDetails.qrCode && !paymentDetails.ticketUrl) {
@@ -504,43 +619,30 @@ export const paymentService = {
           providerOrderId,
         })
       }
-      const savedPayment = await prisma.payment.update({
-        where: { id: payment.id },
+      const savedOrder = await prisma.payment.updateMany({
+        where: { id: payment.id, providerOrderId: null },
         data: {
           providerOrderId,
           status: order.status ?? 'processing',
           statusDetail: order.status_detail,
           providerResponse: sanitizeProviderResponse(responseBody),
         },
-        select: { id: true, status: true, statusDetail: true, amount: true, paymentMethod: true },
       })
-
-      return {
-        payment: {
-          ...savedPayment,
-          amount: Number(savedPayment.amount),
-          productName: cartLines.length === 1
-            ? cartLines[0].product.name
-            : `${cartLines.length} produtos`,
-          currency: cartLines[0].product.currency,
-          items: cartLines.map(({ product, quantity }) => ({
-            productName: product.name,
-            quantity,
-            unitPrice: Number(product.price),
-            lineTotal: Number(product.price) * quantity,
-            currency: product.currency,
-          })),
-          providerOrderId,
-          paymentMethod: savedPayment.paymentMethod,
-          ...paymentDetails,
-        },
+      const savedPayment = await prisma.payment.findUnique({
+        where: { id: payment.id },
+        select: idempotentPaymentSelect,
+      })
+      if (!savedPayment) throw new HttpError(404, 'Pagamento não encontrado')
+      if (savedPayment.providerOrderId !== providerOrderId) {
+        throw new HttpError(502, 'O pedido retornado não corresponde ao pagamento local')
       }
+      if (savedOrder.count === 0 && !savedPayment.providerResponse) {
+        throw new HttpError(503, 'O resultado do pagamento ainda está sendo confirmado')
+      }
+
+      return serializeCreatedPayment(savedPayment)
     } catch (error) {
       if (error instanceof HttpError) throw error
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: { status: 'failed' },
-      })
       console.error('Mercado Pago order creation failed', error)
       throw new HttpError(502, 'Não foi possível concluir o pagamento')
     }
@@ -572,8 +674,24 @@ export const paymentService = {
     const order = mercadoPagoOrderSchema.extend({
       external_reference: z.string().min(1),
     }).parse(await response.json())
-    const updateResult = await prisma.payment.updateMany({
+    const payment = await prisma.payment.findUnique({
       where: { externalReference: order.external_reference },
+      select: idempotentPaymentSelect,
+    })
+    if (!payment) {
+      console.warn('Mercado Pago webhook did not match a local payment', {
+        orderId: String(order.id),
+        externalReference: order.external_reference,
+      })
+      return
+    }
+    if (payment.providerOrderId && payment.providerOrderId !== String(order.id)) {
+      throw new HttpError(409, 'O pedido do webhook não corresponde ao pagamento local')
+    }
+    assertProviderOrderMatchesPayment(order, payment)
+
+    const updateResult = await prisma.payment.updateMany({
+      where: { id: payment.id },
       data: {
         providerOrderId: String(order.id),
         status: order.status ?? 'processing',

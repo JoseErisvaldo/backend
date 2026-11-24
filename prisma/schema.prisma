@@ -45,6 +45,7 @@ model Payment {
   id                String   @id @default(uuid())
   userId            String
   externalReference String   @unique
+  idempotencyKey    String?  @unique
   providerOrderId   String?  @unique
   amount            Decimal  @db.Decimal(10, 2)
   paymentMethod     String   @default("card")
