@@ -11,9 +11,23 @@ import type { IdempotentPayment } from "./payment-idempotency";
 
 export function assertProviderOrderMatchesPayment(
   order: MercadoPagoOrder,
-  payment: Pick<IdempotentPayment, "amount" | "externalReference" | "items">,
+  payment: Pick<
+    IdempotentPayment,
+    "amount" | "externalReference" | "items" | "paymentMethod"
+  >,
+  expectedInstallments?: number,
 ) {
   const currency = payment.items[0]?.currency;
+  const providerPayment = order.transactions?.payments[0];
+  const providerInstallments = providerPayment?.payment_method.installments;
+  const installmentCount = expectedInstallments ?? providerInstallments;
+  const permitsInstallmentSurcharge =
+    payment.paymentMethod !== "pix" &&
+    installmentCount !== undefined &&
+    installmentCount > 1 &&
+    (providerInstallments === undefined ||
+      expectedInstallments === undefined ||
+      providerInstallments === expectedInstallments);
   const orderAmount =
     order.total_amount == null ? null : new Prisma.Decimal(order.total_amount);
   const isPaid = ["processed", "approved", "accredited"].includes(
@@ -24,18 +38,47 @@ export function assertProviderOrderMatchesPayment(
       ? null
       : new Prisma.Decimal(order.total_paid_amount);
 
+  const orderAmountMatches = orderAmount?.equals(payment.amount) ||
+    (permitsInstallmentSurcharge && orderAmount?.greaterThan(payment.amount));
+  const paidAmountMatches = !isPaid ||
+    !paidAmount ||
+    paidAmount.equals(payment.amount) ||
+    (permitsInstallmentSurcharge && paidAmount.greaterThan(payment.amount));
+
   if (
     order.external_reference !== payment.externalReference ||
     !currency ||
     order.currency !== currency ||
     !orderAmount ||
-    !orderAmount.equals(payment.amount) ||
-    (isPaid && paidAmount && !paidAmount.equals(payment.amount))
+    !orderAmountMatches ||
+    !paidAmountMatches
   ) {
+    console.error("Mercado Pago order amount or currency mismatch", {
+      expectedAmount: payment.amount.toFixed(2),
+      orderAmount: order.total_amount ?? null,
+      totalPaidAmount: order.total_paid_amount ?? null,
+      expectedCurrency: currency ?? null,
+      providerCurrency: order.currency ?? null,
+      expectedInstallments: expectedInstallments ?? null,
+      providerInstallments: providerInstallments ?? null,
+    });
     throw new HttpError(
       502,
       "O valor ou a moeda do pedido no provedor não corresponde ao pagamento",
     );
+  }
+
+  if (
+    permitsInstallmentSurcharge &&
+    (orderAmount?.greaterThan(payment.amount) ||
+      paidAmount?.greaterThan(payment.amount))
+  ) {
+    console.info("Mercado Pago installment surcharge validated", {
+      expectedAmount: payment.amount.toFixed(2),
+      orderAmount: order.total_amount ?? null,
+      totalPaidAmount: order.total_paid_amount ?? null,
+      installments: installmentCount,
+    });
   }
 }
 
@@ -129,6 +172,10 @@ export function getPaymentDetails(providerResponse: unknown, createdAt?: Date) {
                 expirationTime: providerPayment.expiration_time ?? null,
                 method: paymentMethod?.id ?? null,
                 methodType: paymentMethod?.type ?? null,
+                installments: paymentMethod?.installments ?? null,
+                installmentAmount: paymentMethod?.installment_amount == null
+                  ? null
+                  : Number(paymentMethod.installment_amount),
                 expiresAt: providerPayment.date_of_expiration ?? null,
               }
             : null,

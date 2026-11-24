@@ -47,7 +47,11 @@ export async function processPaymentWebhook(input: unknown, queryId: unknown, re
   if (payment.providerOrderId && payment.providerOrderId !== String(order.id)) {
     throw new HttpError(409, 'O pedido do webhook não corresponde ao pagamento local')
   }
-  assertProviderOrderMatchesPayment(order, payment)
+  const previousOrder = mercadoPagoOrderSchema.safeParse(payment.providerResponse)
+  const expectedInstallments = previousOrder.success
+    ? previousOrder.data.transactions?.payments[0]?.payment_method.installments
+    : undefined
+  assertProviderOrderMatchesPayment(order, payment, expectedInstallments)
 
   const updateResult = await prisma.payment.updateMany({
     where: { id: payment.id },

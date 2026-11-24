@@ -182,7 +182,11 @@ export async function createPayment(userId: string, input: CreatePaymentInput, i
     }
 
     const order = mercadoPagoOrderSchema.parse(responseBody)
-    assertProviderOrderMatchesPayment(order, payment)
+    assertProviderOrderMatchesPayment(
+      order,
+      payment,
+      input.method === 'card' ? input.installments : undefined,
+    )
     const providerOrderId = String(order.id)
     const savedOrder = await prisma.payment.updateMany({
       where: { id: payment.id, providerOrderId: null },

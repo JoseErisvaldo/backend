@@ -26,6 +26,8 @@ export const mercadoPagoOrderSchema = z.object({
       payment_method: z.object({
         id: z.string().optional(),
         type: z.string().optional(),
+        installments: z.number().int().positive().optional(),
+        installment_amount: z.union([z.string(), z.number()]).optional(),
         qr_code: z.string().optional(),
         qr_code_base64: z.string().optional(),
         ticket_url: z.string().optional(),
