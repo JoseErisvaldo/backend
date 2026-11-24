@@ -1,0 +1,18 @@
+export const sensitiveResponseKeys = new Set([
+  'token',
+  'client_token',
+  'security_code',
+  'card_number',
+  'last_four_digits',
+  'expiration_month',
+  'expiration_year',
+  'identification',
+  'cardholder',
+  'email',
+  'phone',
+  'address',
+  'first_name',
+  'last_name',
+  'payer',
+  'user_id',
+])

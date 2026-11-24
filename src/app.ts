@@ -4,9 +4,9 @@ import rateLimit from 'express-rate-limit'
 import helmet from 'helmet'
 import { env } from './config/env'
 import { errorHandler } from './middlewares/error-handler'
-import { authRoutes } from './modules/auth/auth.routes'
-import { paymentRoutes } from './modules/payments/payment.routes'
-import { productRoutes } from './modules/products/product.routes'
+import { authRoutes } from './modules/auth/routes/auth.routes'
+import { paymentRoutes } from './modules/payments/routes/payment.routes'
+import { productRoutes } from './modules/products/routes/product.routes'
 import { HttpError } from './shared/http-error'
 
 export const app = express()
