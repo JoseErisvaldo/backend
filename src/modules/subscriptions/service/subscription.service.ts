@@ -15,7 +15,7 @@ import {
 
 type PlanInput = {
   name: string
-  tier: 'BASIC' | 'SIMPLE' | 'PRO'
+  tier: 'BASIC' | 'INTERMEDIATE' | 'ADVANCED'
   recurrence: Recurrence
   amount: number
   active: boolean
@@ -40,7 +40,6 @@ type ProviderAuthorizedPayment = {
   status?: string
 }
 
-const tierNames = { BASIC: 'Básico', SIMPLE: 'Simples', PRO: 'Pro' } as const
 const recurrenceNames: Record<Recurrence, string> = {
   WEEKLY: 'Semanal',
   MONTHLY: 'Mensal',
@@ -128,7 +127,7 @@ export async function listAdminPlans(query: {
   sortBy: 'name' | 'tier' | 'recurrence' | 'amount' | 'active' | 'createdAt'
   sortOrder: 'asc' | 'desc'
   search?: string
-  tier?: 'BASIC' | 'SIMPLE' | 'PRO'
+  tier?: 'BASIC' | 'INTERMEDIATE' | 'ADVANCED'
   recurrence?: Recurrence
   active?: 'true' | 'false'
 }) {
@@ -415,7 +414,7 @@ export async function listAllSubscriptions(query: {
   sortOrder: 'asc' | 'desc'
   search?: string
   status?: string
-  tier?: 'BASIC' | 'SIMPLE' | 'PRO'
+  tier?: 'BASIC' | 'INTERMEDIATE' | 'ADVANCED'
   recurrence?: Recurrence
   createdAtFrom?: string
   createdAtTo?: string

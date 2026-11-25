@@ -15,8 +15,8 @@ enum Role {
 
 enum SubscriptionTier {
   BASIC
-  SIMPLE
-  PRO
+  INTERMEDIATE
+  ADVANCED
 }
 
 enum SubscriptionRecurrence {

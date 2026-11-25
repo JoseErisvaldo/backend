@@ -9,7 +9,7 @@ const dateOnlySchema = z.string().refine((value) => {
 
 export const planInputSchema = z.object({
   name: z.string().trim().min(1).max(100),
-  tier: z.enum(['BASIC', 'SIMPLE', 'PRO']),
+  tier: z.enum(['BASIC', 'INTERMEDIATE', 'ADVANCED']),
   recurrence: z.enum(['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY']),
   amount: z.number().positive().max(999999.99),
   active: z.boolean().default(true),
@@ -21,7 +21,7 @@ export const adminPlansQuerySchema = z.object({
   sortBy: z.enum(['name', 'tier', 'recurrence', 'amount', 'active', 'createdAt']).default('name'),
   sortOrder: z.enum(['asc', 'desc']).default('asc'),
   search: z.string().trim().min(1).max(100).optional(),
-  tier: z.enum(['BASIC', 'SIMPLE', 'PRO']).optional(),
+  tier: z.enum(['BASIC', 'INTERMEDIATE', 'ADVANCED']).optional(),
   recurrence: z.enum(['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY']).optional(),
   active: z.enum(['true', 'false']).optional(),
 }).strict()
@@ -33,7 +33,7 @@ export const adminSubscriptionsQuerySchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
   search: z.string().trim().min(1).max(100).optional(),
   status: z.string().trim().min(1).max(40).optional(),
-  tier: z.enum(['BASIC', 'SIMPLE', 'PRO']).optional(),
+  tier: z.enum(['BASIC', 'INTERMEDIATE', 'ADVANCED']).optional(),
   recurrence: z.enum(['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY']).optional(),
   createdAtFrom: dateOnlySchema.optional(),
   createdAtTo: dateOnlySchema.optional(),
