@@ -391,8 +391,10 @@ export async function listAllSubscriptions() {
     orderBy: { createdAt: 'desc' },
     take: 200,
   })
-  return subscriptions.map(({ plan, planName, planTier, planRecurrence, planAmount, planCurrency, charges, id, status, nextPaymentDate, createdAt, updatedAt, user }) => ({
+  return subscriptions.map(({ plan, planName, planTier, planRecurrence, planAmount, planCurrency, charges, id, externalReference, providerSubscriptionId, status, nextPaymentDate, createdAt, updatedAt, user }) => ({
     id,
+    externalReference,
+    providerSubscriptionId,
     status,
     nextPaymentDate,
     nextPaymentCountdown: getRemainingChargeTime(nextPaymentDate),
