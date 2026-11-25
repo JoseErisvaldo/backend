@@ -3,7 +3,7 @@ import { Role, type Prisma, type SubscriptionPlan } from '@prisma/client'
 import { env } from '../../../config/env'
 import { HttpError } from '../../../shared/http-error'
 import { prisma } from '../../../shared/prisma'
-import { providerJson, getProviderDate, verifySubscriptionWebhookSignature } from '../helpers/subscription.shared'
+import { providerJson, getProviderDate, getRemainingChargeTime, verifySubscriptionWebhookSignature } from '../helpers/subscription.shared'
 import {
   createProviderPlanPayload,
   createProviderSubscriptionPayload,
@@ -266,6 +266,7 @@ export async function listUserSubscriptions(userId: string) {
     id,
     status,
     nextPaymentDate,
+    nextPaymentCountdown: getRemainingChargeTime(nextPaymentDate),
     createdAt,
     updatedAt,
     plan: { ...serializePlan(plan), name: planName, tier: planTier, recurrence: planRecurrence, amount: Number(planAmount), currency: planCurrency },
@@ -394,6 +395,7 @@ export async function listAllSubscriptions() {
     id,
     status,
     nextPaymentDate,
+    nextPaymentCountdown: getRemainingChargeTime(nextPaymentDate),
     createdAt,
     updatedAt,
     user,
