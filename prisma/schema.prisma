@@ -93,6 +93,7 @@ model PaymentItem {
 
 model SubscriptionPlan {
   id              String                 @id @default(uuid())
+  name            String                 @db.VarChar(100)
   tier            SubscriptionTier
   recurrence      SubscriptionRecurrence
   amount          Decimal                @db.Decimal(10, 2)
@@ -105,7 +106,6 @@ model SubscriptionPlan {
   updatedAt       DateTime               @updatedAt
   subscriptions   Subscription[]
 
-  @@unique([tier, recurrence])
   @@index([active, tier])
   @@map("subscription_plans")
 }
@@ -114,6 +114,7 @@ model Subscription {
   id                    String             @id @default(uuid())
   userId                String
   planId                String
+  planName              String             @db.VarChar(100)
   planTier              SubscriptionTier
   planRecurrence        SubscriptionRecurrence
   planAmount            Decimal            @db.Decimal(10, 2)

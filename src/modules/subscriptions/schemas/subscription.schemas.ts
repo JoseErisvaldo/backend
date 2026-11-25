@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const planIdSchema = z.string().uuid()
 
 export const planInputSchema = z.object({
+  name: z.string().trim().min(1).max(100),
   tier: z.enum(['BASIC', 'SIMPLE', 'PRO']),
   recurrence: z.enum(['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY']),
   amount: z.number().positive().max(999999.99),

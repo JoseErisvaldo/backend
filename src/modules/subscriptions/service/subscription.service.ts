@@ -14,6 +14,7 @@ import {
 } from '../provider/mercado-pago'
 
 type PlanInput = {
+  name: string
   tier: 'BASIC' | 'SIMPLE' | 'PRO'
   recurrence: Recurrence
   amount: number
@@ -48,6 +49,7 @@ const recurrenceNames: Record<Recurrence, string> = {
 }
 const planSelect = {
   id: true,
+  name: true,
   tier: true,
   recurrence: true,
   amount: true,
@@ -59,8 +61,8 @@ const planSelect = {
   updatedAt: true,
 } satisfies Prisma.SubscriptionPlanSelect
 
-function providerReason(input: Pick<PlanInput, 'tier' | 'recurrence'>) {
-  return `${tierNames[input.tier]} - ${recurrenceNames[input.recurrence]}`
+function providerReason(input: Pick<PlanInput, 'name'>) {
+  return input.name
 }
 
 function serializePlan(plan: Pick<SubscriptionPlan, 'id' | 'tier' | 'recurrence' | 'amount' | 'currency' | 'active' | 'providerPlanId' | 'checkoutUrl' | 'createdAt' | 'updatedAt'>) {
@@ -123,7 +125,7 @@ async function createProviderPlan(input: PlanInput) {
 export async function listAdminPlans() {
   const plans = await prisma.subscriptionPlan.findMany({
     select: planSelect,
-    orderBy: [{ tier: 'asc' }, { recurrence: 'asc' }],
+    orderBy: [{ tier: 'asc' }, { recurrence: 'asc' }, { name: 'asc' }],
   })
   return plans.map(serializePlan)
 }
@@ -132,18 +134,12 @@ export async function listPublicPlans() {
   const plans = await prisma.subscriptionPlan.findMany({
     where: { active: true, providerPlanId: { not: null } },
     select: planSelect,
-    orderBy: [{ tier: 'asc' }, { recurrence: 'asc' }],
+    orderBy: [{ tier: 'asc' }, { recurrence: 'asc' }, { name: 'asc' }],
   })
   return plans.map(serializePublicPlan)
 }
 
 export async function createPlan(input: PlanInput) {
-  const duplicate = await prisma.subscriptionPlan.findUnique({
-    where: { tier_recurrence: { tier: input.tier, recurrence: input.recurrence } },
-    select: { id: true },
-  })
-  if (duplicate) throw new HttpError(409, 'Já existe uma opção para este plano e recorrência')
-
   const providerPlan = await createProviderPlan(input)
   const plan = await prisma.subscriptionPlan.create({
     data: {
@@ -160,16 +156,10 @@ export async function createPlan(input: PlanInput) {
 export async function updatePlan(id: string, input: PlanInput) {
   const plan = await prisma.subscriptionPlan.findUnique({ where: { id } })
   if (!plan) throw new HttpError(404, 'Plano não encontrado')
-  if (plan.tier !== input.tier || plan.recurrence !== input.recurrence) {
-    const duplicate = await prisma.subscriptionPlan.findUnique({
-      where: { tier_recurrence: { tier: input.tier, recurrence: input.recurrence } },
-      select: { id: true },
-    })
-    if (duplicate && duplicate.id !== id) throw new HttpError(409, 'Já existe uma opção para este plano e recorrência')
-  }
   let providerPlan: ProviderPlan | null = null
   if (
     !plan.providerPlanId ||
+    plan.name !== input.name ||
     Number(plan.amount) !== input.amount ||
     plan.tier !== input.tier ||
     plan.recurrence !== input.recurrence
@@ -207,12 +197,13 @@ export async function createSubscription(userId: string, input: { planId: string
   const notificationUrl = getSubscriptionsWebhookUrl()
   const id = randomUUID()
   const externalReference = `subscription:${id}`
-  const reason = providerReason({ tier: plan.tier, recurrence: plan.recurrence })
+  const reason = providerReason({ name: plan.name })
   const localSubscription = await prisma.subscription.create({
     data: {
       id,
       userId,
       planId: plan.id,
+      planName: plan.name,
       planTier: plan.tier,
       planRecurrence: plan.recurrence,
       planAmount: plan.amount,
@@ -271,13 +262,13 @@ export async function listUserSubscriptions(userId: string) {
     },
     orderBy: { createdAt: 'desc' },
   })
-  return subscriptions.map(({ plan, planTier, planRecurrence, planAmount, planCurrency, charges, id, status, nextPaymentDate, createdAt, updatedAt }) => ({
+  return subscriptions.map(({ plan, planName, planTier, planRecurrence, planAmount, planCurrency, charges, id, status, nextPaymentDate, createdAt, updatedAt }) => ({
     id,
     status,
     nextPaymentDate,
     createdAt,
     updatedAt,
-    plan: { ...serializePlan(plan), tier: planTier, recurrence: planRecurrence, amount: Number(planAmount), currency: planCurrency },
+    plan: { ...serializePlan(plan), name: planName, tier: planTier, recurrence: planRecurrence, amount: Number(planAmount), currency: planCurrency },
     charges: charges.map((charge) => ({
       id: charge.id,
       providerPaymentId: charge.providerPaymentId,
@@ -397,14 +388,14 @@ export async function listAllSubscriptions() {
     orderBy: { createdAt: 'desc' },
     take: 200,
   })
-  return subscriptions.map(({ plan, planTier, planRecurrence, planAmount, planCurrency, charges, id, status, nextPaymentDate, createdAt, updatedAt, user }) => ({
+  return subscriptions.map(({ plan, planName, planTier, planRecurrence, planAmount, planCurrency, charges, id, status, nextPaymentDate, createdAt, updatedAt, user }) => ({
     id,
     status,
     nextPaymentDate,
     createdAt,
     updatedAt,
     user,
-    plan: { ...serializePlan(plan), tier: planTier, recurrence: planRecurrence, amount: Number(planAmount), currency: planCurrency },
+    plan: { ...serializePlan(plan), name: planName, tier: planTier, recurrence: planRecurrence, amount: Number(planAmount), currency: planCurrency },
     charges: charges.map((charge) => ({
       id: charge.id,
       providerPaymentId: charge.providerPaymentId,
