@@ -6,6 +6,8 @@ import {
   deactivatePlan,
   listAdminPlans,
   listAllSubscriptions,
+  listAdminCustomers,
+  getAdminCustomerDetails,
   listPublicPlans,
   listUserSubscriptions,
   cancelUserSubscription,
@@ -16,6 +18,7 @@ import {
   createSubscriptionSchema,
   adminPlansQuerySchema,
   adminSubscriptionsQuerySchema,
+  adminCustomersQuerySchema,
   planIdSchema,
   planInputSchema,
   subscriptionWebhookSchema,
@@ -53,6 +56,12 @@ export const subscriptionController = {
   },
   async listAllSubscriptions(req: Request, res: Response) {
     res.json(await listAllSubscriptions(adminSubscriptionsQuerySchema.parse(req.query)))
+  },
+  async listAdminCustomers(req: Request, res: Response) {
+    res.json(await listAdminCustomers(adminCustomersQuerySchema.parse(req.query)))
+  },
+  async getAdminCustomerDetails(req: Request, res: Response) {
+    res.json(await getAdminCustomerDetails(planIdSchema.parse(req.params.id)))
   },
   async webhook(req: Request, res: Response) {
     const rawPayload = req.body as { type?: unknown; topic?: unknown; action?: unknown } | null

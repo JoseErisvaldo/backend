@@ -492,3 +492,147 @@ export async function listAllSubscriptions(query: {
     pagination: { page: query.page, pageSize: query.pageSize, total },
   }
 }
+
+export async function listAdminCustomers(query: {
+  page: number
+  pageSize: number
+  sortBy: 'name' | 'email' | 'createdAt'
+  sortOrder: 'asc' | 'desc'
+  search?: string
+  status?: 'active' | 'cancelled' | 'never_subscribed'
+  createdAtFrom?: string
+  createdAtTo?: string
+}) {
+  const activeStatuses = ['authorized', 'active']
+  const canceledStatuses = ['canceled', 'cancelled']
+  const where: Prisma.UserWhereInput = {
+    role: Role.USER,
+    ...(query.createdAtFrom || query.createdAtTo ? {
+      createdAt: {
+        ...(query.createdAtFrom ? { gte: new Date(`${query.createdAtFrom}T00:00:00.000Z`) } : {}),
+        ...(query.createdAtTo ? { lte: new Date(`${query.createdAtTo}T23:59:59.999Z`) } : {}),
+      },
+    } : {}),
+    ...(query.search ? {
+      OR: [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { email: { contains: query.search, mode: 'insensitive' } },
+      ],
+    } : {}),
+    ...(query.status === 'active' ? {
+      subscriptions: { some: { status: { in: activeStatuses } } },
+    } : {}),
+    ...(query.status === 'cancelled' ? {
+      subscriptions: {
+        some: { status: { in: canceledStatuses } },
+        none: { status: { in: activeStatuses } },
+      },
+    } : {}),
+    ...(query.status === 'never_subscribed' ? {
+      subscriptions: { none: {} },
+    } : {}),
+  }
+  const [users, total, totalCustomers, activeSubscribers] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      skip: query.page * query.pageSize,
+      take: query.pageSize,
+      orderBy: [{ [query.sortBy]: query.sortOrder }, { id: 'asc' }],
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        createdAt: true,
+        subscriptions: {
+          select: { id: true, status: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    }),
+    prisma.user.count({ where }),
+    prisma.user.count({ where: { role: Role.USER } }),
+    prisma.user.count({
+      where: {
+        role: Role.USER,
+        subscriptions: { some: { status: { in: activeStatuses } } },
+      },
+    }),
+  ])
+  return {
+    customers: users.map(({ subscriptions, ...user }) => {
+      const hasActiveSubscription = subscriptions.some(({ status }) => activeStatuses.includes(status.toLowerCase()))
+      const hasCancelledSubscription = subscriptions.some(({ status }) => canceledStatuses.includes(status.toLowerCase()))
+      const subscriptionStatus = hasActiveSubscription
+        ? 'active'
+        : hasCancelledSubscription
+          ? 'cancelled'
+          : 'never_subscribed'
+      return {
+        ...user,
+        subscriptionStatus,
+        subscriptionCount: subscriptions.length,
+        latestSubscriptionAt: subscriptions[0]?.createdAt ?? null,
+      }
+    }),
+    pagination: { page: query.page, pageSize: query.pageSize, total },
+    summary: {
+      totalCustomers,
+      activeSubscribers,
+      nonSubscribers: totalCustomers - activeSubscribers,
+    },
+  }
+}
+
+export async function getAdminCustomerDetails(id: string) {
+  const customer = await prisma.user.findFirst({
+    where: { id, role: Role.USER },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      createdAt: true,
+      subscriptions: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          plan: { select: planSelect },
+          charges: { orderBy: { createdAt: 'desc' } },
+        },
+      },
+    },
+  })
+  if (!customer) throw new HttpError(404, 'Cliente não encontrado')
+  return {
+    customer: {
+      id: customer.id,
+      name: customer.name,
+      email: customer.email,
+      createdAt: customer.createdAt,
+    },
+    subscriptions: customer.subscriptions.map((subscription) => ({
+      id: subscription.id,
+      status: subscription.status,
+      createdAt: subscription.createdAt,
+      updatedAt: subscription.updatedAt,
+      nextPaymentDate: subscription.nextPaymentDate,
+      nextPaymentCountdown: getRemainingChargeTime(subscription.nextPaymentDate),
+      plan: {
+        ...serializePlan(subscription.plan),
+        name: subscription.planName,
+        tier: subscription.planTier,
+        recurrence: subscription.planRecurrence,
+        amount: Number(subscription.planAmount),
+        currency: subscription.planCurrency,
+      },
+      charges: subscription.charges.map((charge) => ({
+        id: charge.id,
+        providerPaymentId: charge.providerPaymentId,
+        amount: charge.amount === null ? null : Number(charge.amount),
+        currency: charge.currency,
+        status: charge.status,
+        statusDetail: charge.statusDetail,
+        paidAt: charge.paidAt,
+        createdAt: charge.createdAt,
+      })),
+    })),
+  }
+}

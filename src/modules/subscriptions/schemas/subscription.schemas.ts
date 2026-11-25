@@ -50,7 +50,26 @@ export const adminSubscriptionsQuerySchema = z.object({
         code: z.ZodIssueCode.custom,
         message: `${range.label}: a data inicial deve ser anterior ou igual à data final.`,
       })
+
     }
+  }
+})
+
+export const adminCustomersQuerySchema = z.object({
+  page: z.coerce.number().int().min(0).default(0),
+  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+  sortBy: z.enum(['name', 'email', 'createdAt']).default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  search: z.string().trim().min(1).max(100).optional(),
+  status: z.enum(['active', 'cancelled', 'never_subscribed']).optional(),
+  createdAtFrom: dateOnlySchema.optional(),
+  createdAtTo: dateOnlySchema.optional(),
+}).strict().superRefine((query, context) => {
+  if (query.createdAtFrom && query.createdAtTo && query.createdAtFrom > query.createdAtTo) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'A data inicial da criação da conta deve ser anterior ou igual à data final.',
+    })
   }
 })
 
