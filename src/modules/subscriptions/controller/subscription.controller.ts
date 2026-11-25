@@ -53,15 +53,42 @@ export const subscriptionController = {
     res.json({ subscriptions: await listAllSubscriptions() })
   },
   async webhook(req: Request, res: Response) {
-    const payload = subscriptionWebhookSchema.parse(req.body)
-    const resourceId = req.query['data.id']?.toString() ?? payload.data?.id?.toString() ?? payload.id?.toString()
-    await processSubscriptionWebhook({
-      payload,
-      requestId: req.header('x-request-id'),
-      signature: req.header('x-signature'),
-      resourceId,
-      topic: req.query.type?.toString() ?? req.query.topic?.toString() ?? payload.type ?? payload.topic,
+    const rawPayload = req.body as { type?: unknown; topic?: unknown; action?: unknown } | null
+    const topic = req.query.type ?? req.query.topic ?? rawPayload?.type ?? rawPayload?.topic
+    const action = rawPayload?.action
+    const eventLabel = (value: unknown) => typeof value === 'string'
+      ? value.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80)
+      : undefined
+    const safeTopic = eventLabel(topic)
+    const safeAction = eventLabel(action)
+    console.info('Mercado Pago subscription webhook received', {
+      topic: safeTopic ?? 'unknown',
+      action: safeAction ?? 'unknown',
     })
-    res.status(200).json({ received: true })
+
+    try {
+      const payload = subscriptionWebhookSchema.parse(req.body)
+      const resourceId = req.query['data.id']?.toString() ?? payload.data?.id?.toString() ?? payload.id?.toString()
+      const outcome = await processSubscriptionWebhook({
+        payload,
+        requestId: req.header('x-request-id'),
+        signature: req.header('x-signature'),
+        resourceId,
+        topic: req.query.type?.toString() ?? req.query.topic?.toString() ?? payload.type ?? payload.topic,
+      })
+      console.info('Mercado Pago subscription webhook processed', {
+        topic: safeTopic ?? 'unknown',
+        action: safeAction ?? 'unknown',
+        outcome,
+      })
+      res.status(200).json({ received: true })
+    } catch (error) {
+      console.error('Mercado Pago subscription webhook failed', {
+        topic: safeTopic ?? 'unknown',
+        action: safeAction ?? 'unknown',
+        errorType: error instanceof HttpError ? `http_${error.statusCode}` : 'internal_error',
+      })
+      throw error
+    }
   },
 }

@@ -292,12 +292,12 @@ export async function cancelUserSubscription(userId: string, id: string) {
 
   const response = await mercadoPagoSubscriptionRequest<ProviderSubscription>(
     `/preapproval/${encodeURIComponent(subscription.providerSubscriptionId)}`,
-    { method: 'PUT', body: JSON.stringify({ status: 'canceled' }) },
+    { method: 'PUT', body: JSON.stringify({ status: 'cancelled' }) },
   )
   await prisma.subscription.update({
     where: { id },
     data: {
-      status: response.status ?? 'canceled',
+      status: response.status ?? 'cancelled',
       providerResponse: safeProviderSubscription(response),
       nextPaymentDate: getProviderDate(response.next_payment_date),
     },
@@ -310,7 +310,7 @@ export async function processSubscriptionWebhook(input: {
   signature?: string
   resourceId?: string
   topic?: string
-}) {
+}): Promise<'subscription_updated' | 'charge_upserted' | 'ignored'> {
   const webhookSecret = env.MP_SUBSCRIPTIONS_WEBHOOK_SECRET
   const body = input.payload as { type?: string; action?: string; data?: { id?: string | number }; id?: string | number }
   const resourceId = input.resourceId ?? body?.data?.id?.toString() ?? body?.id?.toString()
@@ -323,12 +323,12 @@ export async function processSubscriptionWebhook(input: {
     const providerSubscription = await mercadoPagoSubscriptionRequest<ProviderSubscription>(
       `/preapproval/${encodeURIComponent(resourceId)}`,
     )
-    if (!providerSubscription.external_reference) return
+    if (!providerSubscription.external_reference) return 'ignored'
     const subscription = await prisma.subscription.findUnique({
       where: { externalReference: providerSubscription.external_reference },
       select: { id: true, providerSubscriptionId: true },
     })
-    if (!subscription) return
+    if (!subscription) return 'ignored'
     if (subscription.providerSubscriptionId && subscription.providerSubscriptionId !== String(providerSubscription.id)) {
       throw new HttpError(409, 'A notificação não corresponde à assinatura local')
     }
@@ -341,19 +341,19 @@ export async function processSubscriptionWebhook(input: {
         providerResponse: safeProviderSubscription(providerSubscription),
       },
     })
-    return
+    return 'subscription_updated'
   }
   if (topic === 'subscription_authorized_payment') {
     const payment = await mercadoPagoSubscriptionRequest<ProviderAuthorizedPayment>(
       `/authorized_payments/${encodeURIComponent(resourceId)}`,
     )
-    if (!payment.preapproval_id) return
+    if (!payment.preapproval_id) return 'ignored'
     const subscription = await prisma.subscription.findUnique({
       where: { providerSubscriptionId: String(payment.preapproval_id) },
       select: { id: true },
     })
     const paymentId = String(payment.payment?.id ?? payment.id)
-    if (!subscription || !paymentId) return
+    if (!subscription || !paymentId) return 'ignored'
     await prisma.subscriptionCharge.upsert({
       where: { providerPaymentId: paymentId },
       create: {
@@ -375,7 +375,9 @@ export async function processSubscriptionWebhook(input: {
         providerResponse: safeProviderAuthorizedPayment(payment),
       },
     })
+    return 'charge_upserted'
   }
+  return 'ignored'
 }
 
 export async function listAllSubscriptions() {
