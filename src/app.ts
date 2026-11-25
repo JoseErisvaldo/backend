@@ -7,6 +7,7 @@ import { errorHandler } from './middlewares/error-handler'
 import { authRoutes } from './modules/auth/routes/auth.routes'
 import { paymentRoutes } from './modules/payments/routes/payment.routes'
 import { productRoutes } from './modules/products/routes/product.routes'
+import { subscriptionRoutes } from './modules/subscriptions/routes/subscription.routes'
 import { HttpError } from './shared/http-error'
 
 export const app = express()
@@ -21,6 +22,7 @@ app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, limit: 100 }))
 app.use('/api/auth', authRoutes)
 app.use('/api/products', productRoutes)
 app.use('/api/payments', paymentRoutes)
+app.use('/api/subscriptions', subscriptionRoutes)
 app.use((_req, _res, next) => next(new HttpError(404, 'Rota não encontrada')))
 app.use(errorHandler)
 

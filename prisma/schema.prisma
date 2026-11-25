@@ -13,6 +13,19 @@ enum Role {
   MODERATOR
 }
 
+enum SubscriptionTier {
+  BASIC
+  SIMPLE
+  PRO
+}
+
+enum SubscriptionRecurrence {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
 model User {
   id           String    @id @default(uuid())
   name         String
@@ -22,6 +35,7 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   payments     Payment[]
+  subscriptions Subscription[]
 
   @@map("users")
 }
@@ -75,4 +89,66 @@ model PaymentItem {
   @@unique([paymentId, productId])
   @@index([productId])
   @@map("payment_items")
+}
+
+model SubscriptionPlan {
+  id              String                 @id @default(uuid())
+  tier            SubscriptionTier
+  recurrence      SubscriptionRecurrence
+  amount          Decimal                @db.Decimal(10, 2)
+  currency        String                 @default("BRL") @db.VarChar(3)
+  active          Boolean                @default(true)
+  providerPlanId  String?                @unique
+  checkoutUrl     String?                @db.Text
+  providerResponse Json?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  subscriptions   Subscription[]
+
+  @@unique([tier, recurrence])
+  @@index([active, tier])
+  @@map("subscription_plans")
+}
+
+model Subscription {
+  id                    String             @id @default(uuid())
+  userId                String
+  planId                String
+  planTier              SubscriptionTier
+  planRecurrence        SubscriptionRecurrence
+  planAmount            Decimal            @db.Decimal(10, 2)
+  planCurrency          String             @default("BRL") @db.VarChar(3)
+  externalReference     String             @unique
+  providerSubscriptionId String?            @unique
+  payerEmail            String
+  status                String             @default("pending")
+  nextPaymentDate       DateTime?
+  providerResponse      Json?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  plan                  SubscriptionPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  charges               SubscriptionCharge[]
+
+  @@index([userId, createdAt])
+  @@index([planId, status])
+  @@map("subscriptions")
+}
+
+model SubscriptionCharge {
+  id                  String       @id @default(uuid())
+  subscriptionId     String
+  providerPaymentId  String       @unique
+  amount              Decimal?     @db.Decimal(10, 2)
+  currency            String?      @db.VarChar(3)
+  status              String
+  statusDetail        String?
+  paidAt              DateTime?
+  providerResponse    Json?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  subscription        Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+  @@map("subscription_charges")
 }

@@ -8,8 +8,15 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET precisa ter pelo menos 32 caracteres'),
   JWT_EXPIRES_IN: z.string().default('1d'),
   CORS_ORIGIN: z.string().url().default('http://localhost:5173'),
+  MP_SUBSCRIPTIONS_BACK_URL: z
+    .string()
+    .url()
+    .refine((value) => new URL(value).protocol === 'https:', 'MP_SUBSCRIPTIONS_BACK_URL precisa usar HTTPS'),
   MP_ACCESS_TOKEN: z.string().optional(),
+  MP_SUBSCRIPTIONS_ACCESS_TOKEN: z.string().optional(),
   MP_WEBHOOK_SECRET: z.string().optional(),
+  MP_SUBSCRIPTIONS_WEBHOOK_SECRET: z.string().min(1),
+  API_PUBLIC_URL: z.string().url(),
   MP_PIX_APPROVAL_TEST_MODE: z
     .enum(['true', 'false'])
     .default('false')
