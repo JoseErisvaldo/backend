@@ -15,6 +15,8 @@ import {
   processSubscriptionWebhook,
   updatePlan,
 } from '../service/subscription.service'
+import { getAdminSubscriptionsDashboard as getAdminSubscriptionsDashboardData } from '../service/get-admin-subscriptions-dashboard.service'
+import { adminSubscriptionsDashboardQuerySchema } from '../schemas/admin-subscriptions-dashboard.schemas'
 import {
   createSubscriptionSchema,
   adminPlansQuerySchema,
@@ -63,6 +65,10 @@ export const subscriptionController = {
   },
   async getAdminCustomerDashboard(_req: Request, res: Response) {
     res.json(await getAdminCustomerDashboard())
+  },
+  async getAdminSubscriptionsDashboard(req: Request, res: Response) {
+    const query = adminSubscriptionsDashboardQuerySchema.parse(req.query)
+    res.json(await getAdminSubscriptionsDashboardData(query))
   },
   async getAdminCustomerDetails(req: Request, res: Response) {
     res.json(await getAdminCustomerDetails(planIdSchema.parse(req.params.id)))
