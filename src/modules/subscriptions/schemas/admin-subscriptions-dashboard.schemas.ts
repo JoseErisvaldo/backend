@@ -33,6 +33,8 @@ export const adminSubscriptionsDashboardQuerySchema = z.object({
   dateFrom: dateOnlySchema,
   dateTo: dateOnlySchema,
   comparison: z.enum(['true']).optional(),
+  upcomingPage: z.coerce.number().int().min(1).default(1),
+  upcomingPageSize: z.coerce.number().int().min(1).max(50).default(10),
 }).refine((query) => query.dateFrom <= query.dateTo, {
   message: 'A data inicial deve ser anterior ou igual à data final.',
   path: ['dateTo'],

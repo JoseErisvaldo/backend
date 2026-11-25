@@ -3,7 +3,12 @@ import { prisma } from '../../../shared/prisma'
 const paidChargeStatuses = new Set(['approved', 'accredited', 'processed'])
 const activeSubscriptionStatuses = ['authorized', 'active']
 
-type DashboardQuery = { dateFrom: string; dateTo: string }
+type DashboardQuery = {
+  dateFrom: string
+  dateTo: string
+  upcomingPage: number
+  upcomingPageSize: number
+}
 
 function addDays(date: string, days: number) {
   const result = new Date(`${date}T00:00:00.000Z`)
@@ -198,7 +203,18 @@ export async function getAdminSubscriptionsDashboard(query: DashboardQuery) {
       totalExpectedCharges: forecast.reduce((sum, day) => sum + day.expectedCharges, 0),
       totalExpectedAmount: forecast.reduce((sum, day) => sum + day.expectedAmount, 0),
       daily: forecast,
-      upcomingCharges: upcomingCharges.slice(0, 100),
+      upcomingCharges: {
+        items: upcomingCharges.slice(
+          (query.upcomingPage - 1) * query.upcomingPageSize,
+          query.upcomingPage * query.upcomingPageSize,
+        ),
+        pagination: {
+          page: query.upcomingPage,
+          pageSize: query.upcomingPageSize,
+          total: upcomingCharges.length,
+          pageCount: Math.ceil(upcomingCharges.length / query.upcomingPageSize),
+        },
+      },
     },
   }
 }
