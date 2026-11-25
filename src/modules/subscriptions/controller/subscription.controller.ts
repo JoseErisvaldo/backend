@@ -14,6 +14,8 @@ import {
 } from '../service/subscription.service'
 import {
   createSubscriptionSchema,
+  adminPlansQuerySchema,
+  adminSubscriptionsQuerySchema,
   planIdSchema,
   planInputSchema,
   subscriptionWebhookSchema,
@@ -23,8 +25,8 @@ export const subscriptionController = {
   async listPublicPlans(_req: Request, res: Response) {
     res.json({ plans: await listPublicPlans() })
   },
-  async listAdminPlans(_req: Request, res: Response) {
-    res.json({ plans: await listAdminPlans() })
+  async listAdminPlans(req: Request, res: Response) {
+    res.json(await listAdminPlans(adminPlansQuerySchema.parse(req.query)))
   },
   async createPlan(req: Request, res: Response) {
     res.status(201).json({ plan: await createPlan(planInputSchema.parse(req.body)) })
@@ -49,8 +51,8 @@ export const subscriptionController = {
     await cancelUserSubscription(req.userId, planIdSchema.parse(req.params.id))
     res.status(204).send()
   },
-  async listAllSubscriptions(_req: Request, res: Response) {
-    res.json({ subscriptions: await listAllSubscriptions() })
+  async listAllSubscriptions(req: Request, res: Response) {
+    res.json(await listAllSubscriptions(adminSubscriptionsQuerySchema.parse(req.query)))
   },
   async webhook(req: Request, res: Response) {
     const rawPayload = req.body as { type?: unknown; topic?: unknown; action?: unknown } | null

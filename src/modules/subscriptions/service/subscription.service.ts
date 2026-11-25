@@ -122,12 +122,39 @@ async function createProviderPlan(input: PlanInput) {
   return response
 }
 
-export async function listAdminPlans() {
-  const plans = await prisma.subscriptionPlan.findMany({
-    select: planSelect,
-    orderBy: [{ tier: 'asc' }, { recurrence: 'asc' }, { name: 'asc' }],
-  })
-  return plans.map(serializePlan)
+export async function listAdminPlans(query: {
+  page: number
+  pageSize: number
+  sortBy: 'name' | 'tier' | 'recurrence' | 'amount' | 'active' | 'createdAt'
+  sortOrder: 'asc' | 'desc'
+  search?: string
+  tier?: 'BASIC' | 'SIMPLE' | 'PRO'
+  recurrence?: Recurrence
+  active?: 'true' | 'false'
+}) {
+  const where: Prisma.SubscriptionPlanWhereInput = {
+    ...(query.search ? { name: { contains: query.search, mode: 'insensitive' } } : {}),
+    ...(query.tier ? { tier: query.tier } : {}),
+    ...(query.recurrence ? { recurrence: query.recurrence } : {}),
+    ...(query.active ? { active: query.active === 'true' } : {}),
+  }
+  const orderBy: Prisma.SubscriptionPlanOrderByWithRelationInput = {
+    [query.sortBy]: query.sortOrder,
+  }
+  const [plans, total] = await Promise.all([
+    prisma.subscriptionPlan.findMany({
+      where,
+      skip: query.page * query.pageSize,
+      take: query.pageSize,
+      select: planSelect,
+      orderBy: [orderBy, { id: 'asc' }],
+    }),
+    prisma.subscriptionPlan.count({ where }),
+  ])
+  return {
+    plans: plans.map(serializePlan),
+    pagination: { page: query.page, pageSize: query.pageSize, total },
+  }
 }
 
 export async function listPublicPlans() {
@@ -381,36 +408,88 @@ export async function processSubscriptionWebhook(input: {
   return 'ignored'
 }
 
-export async function listAllSubscriptions() {
-  const subscriptions = await prisma.subscription.findMany({
-    include: {
-      user: { select: { id: true, name: true, email: true } },
-      plan: { select: planSelect },
-      charges: { orderBy: { createdAt: 'desc' }, take: 5 },
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 200,
+export async function listAllSubscriptions(query: {
+  page: number
+  pageSize: number
+  sortBy: 'customer' | 'email' | 'plan' | 'status' | 'nextPaymentDate' | 'createdAt' | 'amount'
+  sortOrder: 'asc' | 'desc'
+  search?: string
+  status?: string
+  tier?: 'BASIC' | 'SIMPLE' | 'PRO'
+  recurrence?: Recurrence
+  createdAtFrom?: string
+  createdAtTo?: string
+  nextPaymentDateFrom?: string
+  nextPaymentDateTo?: string
+}) {
+  const toDateRange = (from?: string, to?: string) => ({
+    ...(from ? { gte: new Date(`${from}T00:00:00.000Z`) } : {}),
+    ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
   })
-  return subscriptions.map(({ plan, planName, planTier, planRecurrence, planAmount, planCurrency, charges, id, externalReference, providerSubscriptionId, status, nextPaymentDate, createdAt, updatedAt, user }) => ({
-    id,
-    externalReference,
-    providerSubscriptionId,
-    status,
-    nextPaymentDate,
-    nextPaymentCountdown: getRemainingChargeTime(nextPaymentDate),
-    createdAt,
-    updatedAt,
-    user,
-    plan: { ...serializePlan(plan), name: planName, tier: planTier, recurrence: planRecurrence, amount: Number(planAmount), currency: planCurrency },
-    charges: charges.map((charge) => ({
-      id: charge.id,
-      providerPaymentId: charge.providerPaymentId,
-      status: charge.status,
-      statusDetail: charge.statusDetail,
-      currency: charge.currency,
-      paidAt: charge.paidAt,
-      createdAt: charge.createdAt,
-      amount: charge.amount === null ? null : Number(charge.amount),
+  const where: Prisma.SubscriptionWhereInput = {
+    ...(query.search ? {
+      OR: [
+        { user: { is: { name: { contains: query.search, mode: 'insensitive' } } } },
+        { user: { is: { email: { contains: query.search, mode: 'insensitive' } } } },
+        { planName: { contains: query.search, mode: 'insensitive' } },
+      ],
+    } : {}),
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.tier ? { planTier: query.tier } : {}),
+    ...(query.recurrence ? { planRecurrence: query.recurrence } : {}),
+    ...(query.createdAtFrom || query.createdAtTo
+      ? { createdAt: toDateRange(query.createdAtFrom, query.createdAtTo) }
+      : {}),
+    ...(query.nextPaymentDateFrom || query.nextPaymentDateTo
+      ? { nextPaymentDate: toDateRange(query.nextPaymentDateFrom, query.nextPaymentDateTo) }
+      : {}),
+  }
+  const orderBy: Prisma.SubscriptionOrderByWithRelationInput = query.sortBy === 'customer'
+    ? { user: { name: query.sortOrder } }
+    : query.sortBy === 'email'
+      ? { user: { email: query.sortOrder } }
+      : query.sortBy === 'plan'
+        ? { planName: query.sortOrder }
+        : query.sortBy === 'amount'
+          ? { planAmount: query.sortOrder }
+          : { [query.sortBy]: query.sortOrder }
+  const [subscriptions, total] = await Promise.all([
+    prisma.subscription.findMany({
+      where,
+      skip: query.page * query.pageSize,
+      take: query.pageSize,
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        plan: { select: planSelect },
+        charges: { orderBy: { createdAt: 'desc' }, take: 5 },
+      },
+      orderBy: [orderBy, { id: 'asc' }],
+    }),
+    prisma.subscription.count({ where }),
+  ])
+  return {
+    subscriptions: subscriptions.map(({ plan, planName, planTier, planRecurrence, planAmount, planCurrency, charges, id, externalReference, providerSubscriptionId, status, nextPaymentDate, createdAt, updatedAt, user }) => ({
+      id,
+      externalReference,
+      providerSubscriptionId,
+      status,
+      nextPaymentDate,
+      nextPaymentCountdown: getRemainingChargeTime(nextPaymentDate),
+      createdAt,
+      updatedAt,
+      user,
+      plan: { ...serializePlan(plan), name: planName, tier: planTier, recurrence: planRecurrence, amount: Number(planAmount), currency: planCurrency },
+      charges: charges.map((charge) => ({
+        id: charge.id,
+        providerPaymentId: charge.providerPaymentId,
+        status: charge.status,
+        statusDetail: charge.statusDetail,
+        currency: charge.currency,
+        paidAt: charge.paidAt,
+        createdAt: charge.createdAt,
+        amount: charge.amount === null ? null : Number(charge.amount),
+      })),
     })),
-  }))
+    pagination: { page: query.page, pageSize: query.pageSize, total },
+  }
 }
