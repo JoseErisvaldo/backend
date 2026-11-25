@@ -15,6 +15,7 @@ subscriptionRoutes.patch('/admin/plans/:id', ensureAuthenticated, ensureRoles(Ro
 subscriptionRoutes.delete('/admin/plans/:id', ensureAuthenticated, ensureRoles(Role.ADMIN, Role.MODERATOR), asyncHandler(subscriptionController.deactivatePlan))
 subscriptionRoutes.get('/admin', ensureAuthenticated, ensureRoles(Role.ADMIN, Role.MODERATOR), asyncHandler(subscriptionController.listAllSubscriptions))
 subscriptionRoutes.get('/admin/customers', ensureAuthenticated, ensureRoles(Role.ADMIN, Role.MODERATOR), asyncHandler(subscriptionController.listAdminCustomers))
+subscriptionRoutes.get('/admin/customers/dashboard', ensureAuthenticated, ensureRoles(Role.ADMIN, Role.MODERATOR), asyncHandler(subscriptionController.getAdminCustomerDashboard))
 subscriptionRoutes.get('/admin/customers/:id', ensureAuthenticated, ensureRoles(Role.ADMIN, Role.MODERATOR), asyncHandler(subscriptionController.getAdminCustomerDetails))
 subscriptionRoutes.get('/mine', ensureAuthenticated, asyncHandler(subscriptionController.listUserSubscriptions))
 subscriptionRoutes.post('/mine', ensureAuthenticated, asyncHandler(subscriptionController.createSubscription))

@@ -3,6 +3,7 @@ import { Role, type Prisma, type SubscriptionPlan } from '@prisma/client'
 import { env } from '../../../config/env'
 import { HttpError } from '../../../shared/http-error'
 import { prisma } from '../../../shared/prisma'
+import { getAverage } from '../../../shared/utils/get-average'
 import { providerJson, getProviderDate, getRemainingChargeTime, verifySubscriptionWebhookSignature } from '../helpers/subscription.shared'
 import {
   createProviderPlanPayload,
@@ -580,6 +581,65 @@ export async function listAdminCustomers(query: {
       activeSubscribers,
       nonSubscribers: totalCustomers - activeSubscribers,
     },
+  }
+}
+
+export async function getAdminCustomerDashboard() {
+  const activeStatuses = ['authorized', 'active']
+  const now = new Date()
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const firstDayOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  const firstMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1))
+  const dailyStart = new Date(today)
+  dailyStart.setUTCDate(dailyStart.getUTCDate() - 29)
+
+  const [totalCustomers, activeSubscribers, registrations] = await Promise.all([
+    prisma.user.count({ where: { role: Role.USER } }),
+    prisma.user.count({
+      where: {
+        role: Role.USER,
+        subscriptions: { some: { status: { in: activeStatuses } } },
+      },
+    }),
+    prisma.user.findMany({
+      where: { role: Role.USER, createdAt: { gte: firstMonth } },
+      select: { createdAt: true },
+    }),
+  ])
+  const dailyCounts = new Map<string, number>()
+  const monthlyCounts = new Map<string, number>()
+  for (const registration of registrations) {
+    const date = registration.createdAt.toISOString().slice(0, 10)
+    const month = date.slice(0, 7)
+    dailyCounts.set(date, (dailyCounts.get(date) ?? 0) + 1)
+    monthlyCounts.set(month, (monthlyCounts.get(month) ?? 0) + 1)
+  }
+  const dailyCountsByDate = Array.from({ length: 30 }, (_, index) => {
+    const date = new Date(dailyStart)
+    date.setUTCDate(dailyStart.getUTCDate() + index)
+    const key = date.toISOString().slice(0, 10)
+    return { date: key, count: dailyCounts.get(key) ?? 0 }
+  })
+  const monthlyCountsByMonth = Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(Date.UTC(firstMonth.getUTCFullYear(), firstMonth.getUTCMonth() + index, 1))
+    const key = date.toISOString().slice(0, 7)
+    return { month: key, count: monthlyCounts.get(key) ?? 0 }
+  })
+  const dailyAverage = getAverage(dailyCountsByDate.map(({ count }) => count))
+  const monthlyAverage = getAverage(monthlyCountsByMonth.map(({ count }) => count))
+  const daily = dailyCountsByDate.map((item) => ({ ...item, average: dailyAverage }))
+  const monthly = monthlyCountsByMonth.map((item) => ({ ...item, average: monthlyAverage }))
+  const totalRegisteredThisMonth = registrations.filter(({ createdAt }) => createdAt >= firstDayOfMonth).length
+
+  return {
+    summary: {
+      totalCustomers,
+      activeSubscribers,
+      nonSubscribers: totalCustomers - activeSubscribers,
+      registeredThisMonth: totalRegisteredThisMonth,
+    },
+    daily,
+    monthly,
   }
 }
 

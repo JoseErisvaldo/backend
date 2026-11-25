@@ -8,6 +8,7 @@ import {
   listAllSubscriptions,
   listAdminCustomers,
   getAdminCustomerDetails,
+  getAdminCustomerDashboard,
   listPublicPlans,
   listUserSubscriptions,
   cancelUserSubscription,
@@ -59,6 +60,9 @@ export const subscriptionController = {
   },
   async listAdminCustomers(req: Request, res: Response) {
     res.json(await listAdminCustomers(adminCustomersQuerySchema.parse(req.query)))
+  },
+  async getAdminCustomerDashboard(_req: Request, res: Response) {
+    res.json(await getAdminCustomerDashboard())
   },
   async getAdminCustomerDetails(req: Request, res: Response) {
     res.json(await getAdminCustomerDetails(planIdSchema.parse(req.params.id)))
