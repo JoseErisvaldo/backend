@@ -6,4 +6,5 @@ import { asyncHandler } from '../../../shared/async-handler'
 import { paymentController } from '../controller/payment.controller'
 
 export const listAdminPaymentsRoutes = Router()
+listAdminPaymentsRoutes.get('/manage/dashboard', rateLimit({ windowMs: 15 * 60 * 1000, limit: 120 }), ensureAuthenticated, ensureRoles(Role.ADMIN, Role.MODERATOR), asyncHandler(paymentController.ordersDashboard))
 listAdminPaymentsRoutes.get('/manage', rateLimit({ windowMs: 15 * 60 * 1000, limit: 240 }), ensureAuthenticated, ensureRoles(Role.ADMIN, Role.MODERATOR), asyncHandler(paymentController.listForAdmin))
